@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>排雷 Minesweeper</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; display: flex;
+    flex-direction: column; align-items: center; gap: 14px; padding: 24px;
+    background: light-dark(#f4f6f9, #17191e); color: light-dark(#222, #eee); }
+  h1 { font-size: 20px; margin: 0; }
+  .hud { display: flex; gap: 12px; align-items: center; }
+  .counter { font-size: 18px; font-weight: 700; font-variant-numeric: tabular-nums;
+    background: light-dark(#e3e8ef, #262a33); border-radius: 8px; padding: 6px 14px; }
+  .face { font-size: 22px; cursor: pointer; border: none; border-radius: 8px; padding: 6px 16px;
+    background: light-dark(#e3e8ef, #262a33); }
+  .face:hover { filter: brightness(1.1); }
+  select { font-size: 14px; padding: 4px 8px; border-radius: 6px; }
+  #board { display: grid; gap: 1px; background: #6b7a8f; padding: 4px;
+    border: 3px solid #6b7a8f; border-radius: 6px; user-select: none; }
+  .sq { display: flex; align-items: center; justify-content: center; font-weight: 700;
+    border-radius: 2px; cursor: pointer; }
+  .covered { background: light-dark(#9db3c8, #3a4353); }
+  .covered:hover { background: light-dark(#b8cae0, #4a556a); }
+  .revealed { background: light-dark(#dfe5ec, #232732); cursor: default; }
+  .zero { background: transparent; cursor: default; }
+  .mine-hit { background: #d43a2f; }
+  .n1 { color: #4a90d9; } .n2 { color: #3f9d4e; } .n3 { color: #d1342f; } .n4 { color: #8248c7; }
+  .n5 { color: #b05a1e; } .n6 { color: #17a39c; } .n7 { color: #666; } .n8 { color: #999; }
+  .note { font-size: 13px; opacity: .75; }
+</style>
+</head>
+<body>
+<h1>💣 排雷 Minesweeper</h1>
+<div class="hud">
+  <label>难度
+    <select id="level">
+      <option value="beginner">初级 9×9 · 10雷</option>
+      <option value="intermediate">中级 16×16 · 40雷</option>
+      <option value="expert">高级 16×30 · 99雷</option>
+    </select>
+  </label>
+  <div class="counter" id="mines"></div>
+  <button class="face" id="face" title="重新开始">🙂</button>
+  <div class="counter" id="time">⏱ 00:00</div>
+</div>
+<div id="board"></div>
+<div class="note" id="status"></div>
+<script>
+// ============================================================
+// 排雷引擎（与 packages/mine-float/client.js 中 ===ENGINE=== 块保持一致）
+// ============================================================
+const LEVELS = {
+  beginner: { rows: 9, cols: 9, mines: 10 },
+  intermediate: { rows: 16, cols: 16, mines: 40 },
+  expert: { rows: 16, cols: 30, mines: 99 },
+};
+
+function newGame(levelKey) {
+  const L = LEVELS[levelKey] || LEVELS.beginner;
+  return {
+    level: LEVELS[levelKey] ? levelKey : 'beginner',
+    rows: L.rows, cols: L.cols, mines: L.mines,
+    minesPlaced: false,
+    grid: Array.from({ length: L.rows }, () => Array.from({ length: L.cols }, () => ({
+      mine: false, revealed: false, flag: false, n: 0, exploded: false,
+    }))),
+    status: 'playing', revealedCount: 0, flagCount: 0,
+  };
+}
+function cloneState(s) { return { ...s, grid: s.grid.map(row => row.map(c => ({ ...c }))) }; }
+function neighbors(s, r, c) {
+  const out = [];
+  for (let dr = -1; dr <= 1; dr++) for (let dc = -1; dc <= 1; dc++) {
+    if (!dr && !dc) continue;
+    const nr = r + dr, nc = c + dc;
+    if (nr >= 0 && nr < s.rows && nc >= 0 && nc < s.cols) out.push([nr, nc]);
+  }
+  return out;
+}
+function placeMines(state, safeR, safeC) {
+  const s = cloneState(state);
+  const cells = [];
+  for (let r = 0; r < s.rows; r++) for (let c = 0; c < s.cols; c++) cells.push([r, c]);
+  let forbidden = new Set([safeR + ',' + safeC, ...neighbors(s, safeR, safeC).map(([r, c]) => r + ',' + c)]);
+  if (cells.length - forbidden.size < s.mines) forbidden = new Set([safeR + ',' + safeC]);
+  const pool = cells.filter(([r, c]) => !forbidden.has(r + ',' + c));
+  for (let i = pool.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [pool[i], pool[j]] = [pool[j], pool[i]];
+  }
+  for (let i = 0; i < s.mines; i++) s.grid[pool[i][0]][pool[i][1]].mine = true;
+  for (let r = 0; r < s.rows; r++) for (let c = 0; c < s.cols; c++) {
+    s.grid[r][c].n = neighbors(s, r, c).filter(([nr, nc]) => s.grid[nr][nc].mine).length;
+  }
+  s.minesPlaced = true;
+  return s;
+}
+function reveal(prev, r, c) {
+  if (prev.status !== 'playing') return prev;
+  if (r < 0 || r >= prev.rows || c < 0 || c >= prev.cols) return prev;
+  const cell = prev.grid[r][c];
+  if (cell.revealed || cell.flag) return prev;
+  let s = prev;
+  if (!s.minesPlaced) s = placeMines(s, r, c);
+  const cell2 = s.grid[r][c];
+  if (cell2.mine) {
+    const out = cloneState(s);
+    out.grid[r][c].exploded = true;
+    for (let rr = 0; rr < out.rows; rr++) for (let cc = 0; cc < out.cols; cc++) {
+      if (out.grid[rr][cc].mine) out.grid[rr][cc].revealed = true;
+    }
+    out.status = 'lost';
+    return out;
+  }
+  const out = cloneState(s);
+  const stack = [[r, c]];
+  while (stack.length) {
+    const [cr, cc] = stack.pop();
+    const cell3 = out.grid[cr][cc];
+    if (cell3.revealed || cell3.flag || cell3.mine) continue;
+    cell3.revealed = true;
+    out.revealedCount++;
+    if (cell3.n === 0) {
+      for (const [nr, nc] of neighbors(out, cr, cc)) {
+        if (!out.grid[nr][nc].revealed) stack.push([nr, nc]);
+      }
+    }
+  }
+  if (out.revealedCount === out.rows * out.cols - out.mines) out.status = 'won';
+  return out;
+}
+function toggleFlag(prev, r, c) {
+  if (prev.status !== 'playing') return prev;
+  if (r < 0 || r >= prev.rows || c < 0 || c >= prev.cols) return prev;
+  const cell = prev.grid[r][c];
+  if (cell.revealed) return prev;
+  const s = cloneState(prev);
+  s.grid[r][c].flag = !s.grid[r][c].flag;
+  s.flagCount += s.grid[r][c].flag ? 1 : -1;
+  return s;
+}
+function chord(prev, r, c) {
+  if (prev.status !== 'playing') return prev;
+  const cell = prev.grid[r] && prev.grid[r][c];
+  if (!cell || !cell.revealed || cell.n === 0) return prev;
+  const flags = neighbors(prev, r, c).filter(([nr, nc]) => prev.grid[nr][nc].flag).length;
+  if (flags !== cell.n) return prev;
+  let s = prev;
+  for (const [nr, nc] of neighbors(prev, r, c)) {
+    const nc2 = s.grid[nr][nc];
+    if (!nc2.revealed && !nc2.flag) {
+      s = reveal(s, nr, nc);
+      if (s.status !== 'playing') break;
+    }
+  }
+  return s;
+}
+
+// ============================================================
+// 渲染
+// ============================================================
+const NUM_CLASS = ['', 'n1', 'n2', 'n3', 'n4', 'n5', 'n6', 'n7', 'n8'];
+let game = newGame('beginner');
+let elapsed = 0, timer = null;
+const $ = id => document.getElementById(id);
+
+function fmtTime(sec) {
+  return String(Math.floor(sec / 60)).padStart(2, '0') + ':' + String(sec % 60).padStart(2, '0');
+}
+function startTimer() {
+  stopTimer();
+  timer = setInterval(() => { elapsed++; $('time').textContent = '⏱ ' + fmtTime(elapsed); }, 1000);
+}
+function stopTimer() { if (timer) { clearInterval(timer); timer = null; } }
+
+function restart(level) {
+  game = newGame(level || game.level);
+  elapsed = 0; stopTimer();
+  $('time').textContent = '⏱ 00:00';
+  render();
+}
+
+function render() {
+  const s = game;
+  const cellPx = s.cols <= 10 ? 34 : s.cols <= 16 ? 28 : 22;
+  $('mines').textContent = '💣 ' + (s.mines - s.flagCount);
+  $('face').textContent = s.status === 'won' ? '😎' : s.status === 'lost' ? '💥' : '🙂';
+  $('status').textContent = s.status === 'won' ? `🎉 胜利！用时 ${fmtTime(elapsed)}`
+    : s.status === 'lost' ? '💥 踩雷了 — 点中间按钮重开'
+    : s.minesPlaced ? '左键翻开 · 右键标旗 · 双击数字快速展开' : '左键翻开任意格开始（首翻保证安全）';
+  const board = $('board');
+  board.innerHTML = '';
+  board.style.gridTemplateColumns = `repeat(${s.cols}, ${cellPx}px)`;
+  for (let r = 0; r < s.rows; r++) for (let c = 0; c < s.cols; c++) {
+    const cell = s.grid[r][c];
+    const el = document.createElement('div');
+    el.className = 'sq ' + (cell.revealed ? (cell.n === 0 && !cell.mine ? 'zero revealed' : 'revealed') : 'covered')
+      + (s.status === 'lost' && cell.exploded ? ' mine-hit' : '');
+    el.style.width = el.style.height = cellPx + 'px';
+    el.style.fontSize = Math.round(cellPx * 0.55) + 'px';
+    let content = '';
+    if (cell.revealed) {
+      if (cell.mine) content = '💣';
+      else if (cell.n > 0) { content = String(cell.n); el.classList.add(NUM_CLASS[cell.n]); }
+    } else if (cell.flag) {
+      content = s.status === 'lost' && !cell.mine ? '❌' : '🚩';
+    }
+    el.textContent = content;
+    el.addEventListener('click', () => { game = reveal(game, r, c); after(); });
+    el.addEventListener('contextmenu', e => { e.preventDefault(); game = toggleFlag(game, r, c); render(); });
+    el.addEventListener('dblclick', () => { game = chord(game, r, c); after(); });
+    board.appendChild(el);
+  }
+}
+function after() {
+  if (game.minesPlaced && game.status === 'playing' && !timer) startTimer();
+  if (game.status !== 'playing') stopTimer();
+  render();
+}
+
+$('face').addEventListener('click', () => restart());
+$('level').addEventListener('change', e => restart(e.target.value));
+render();
+</script>
+</body>
+</html>

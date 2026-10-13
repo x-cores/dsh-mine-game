@@ -1,0 +1,7 @@
+url: https://github.com/x-cores/dsh-mine-game/tree/main/packages/mine-float
+name: x-cores/dsh-mine-game#mine-float
+category: fun
+description:
+  en: Minesweeper in a draggable floating window with first-click-safe layout, flags, chording and timer.
+  zh: 可拖动悬浮窗排雷游戏，首翻安全、标旗、快速展开与计时。
+tarball: https://github.com/x-cores/dsh-mine-game/releases/download/v1.0.0/dsh-mine-float-1.0.0.tgz

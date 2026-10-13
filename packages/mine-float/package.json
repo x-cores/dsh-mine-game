@@ -1,0 +1,21 @@
+{
+  "name": "dsh-mine-float",
+  "version": "1.1.0",
+  "private": true,
+  "description": "Minesweeper in a draggable floating window with first-click-safe layout, flags and timer.",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/x-cores/dsh-mine-game.git",
+    "directory": "packages/mine-float"
+  },
+  "type": "module",
+  "exports": { ".": "./index.js", "./client": "./client.js" },
+  "dsh": {
+    "bundle": { "patch": "./cordis.patch.yml" },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": ["@deepseek-ai/dsh-client-ui-conversation"]
+    }
+  }
+}
